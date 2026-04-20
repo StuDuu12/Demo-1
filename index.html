@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GVM Cybersecurity: Network Firewall Engine</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { font-family: 'Inter', monospace, system-ui; background-color: #0f172a; color: #e2e8f0; overflow-x: hidden; }
+        
+        /* GVM Interaction Animations */
+        /* GVM Interaction Animations */
+        @keyframes pass-through {
+            0% { transform: scale(0.5) translateX(-400px); opacity: 0; }
+            20% { transform: scale(1.1) translateX(-200px); opacity: 1; }
+            50% { transform: scale(1) translateX(150px); filter: brightness(1.5); }
+            100% { transform: scale(1) translateX(480px); opacity: 0; }
+        }
+        @keyframes crash-bounce {
+            0% { transform: scale(0.5) translateX(-400px); opacity: 0; }
+            30% { transform: scale(1.1) translateX(-100px); opacity: 1; }
+            50% { transform: translateX(80px) rotate(15deg); filter: grayscale(1) contrast(2); }
+            100% { transform: translateX(50px) translateY(200px) rotate(45deg); opacity: 0; }
+        }
+        @keyframes flow-to-quarantine {
+            0% { transform: scale(0.5) translateX(-500px); opacity: 0; }
+            20% { transform: scale(1.1) translateX(-300px); opacity: 1; }
+            50% { transform: scale(1.2) translateX(100px); }
+            100% { transform: scale(1) translateX(450px); opacity: 1; }
+        }
+        @keyframes red-alert-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); transform: scale(0.98); }
+            50% { box-shadow: 0 0 40px 10px rgba(239, 68, 68, 0.4); transform: scale(1.05); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); transform: scale(0.98); }
+        }
+
+        .anim-allow { animation: pass-through 2s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        .anim-drop { animation: crash-bounce 1.5s ease-in forwards; }
+        .anim-quarantine { animation: flow-to-quarantine 2.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        
+        .quarantine-bubble {
+            position: absolute; inset: -30px; border-radius: 50%;
+            border: 6px solid #ef4444; background: rgba(239, 68, 68, 0.2);
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), inset 0 0 20px rgba(239, 68, 68, 0.4);
+            z-index: -1; animation: red-alert-pulse 1.2s infinite;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        .laser-grid-blue {
+            background-image: linear-gradient(rgba(14, 165, 233, 0.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(14, 165, 233, 0.1) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        .laser-grid-gray {
+            background-image: linear-gradient(rgba(0, 0, 0, 0.08) 1.5px, transparent 1.5px),
+            linear-gradient(90deg, rgba(0, 0, 0, 0.08) 1.5px, transparent 1.5px);
+            background-size: 40px 40px;
+        }
+        .laser-grid-green {
+            background-image: linear-gradient(rgba(16, 185, 129, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(16, 185, 129, 0.08) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- NETWORK DATA & PACKET DICTIONARY ---
+        // Encryption Types: null (none), 'tls12', 'tls13', 'aes256', 'rsa2048', 'weak', 'ecdhe', 'chacha20'
+        // Encryption Strength: 'weak' (1 ring), 'medium' (2 rings), 'strong' (3 rings)
+        
+        // Packet Categories for Organization
+        const packetCategories = {
+            web: { name: 'Web Traffic', color: '#3b82f6', icon: '🌐' },
+            remote: { name: 'Remote Access', color: '#8b5cf6', icon: '🔌' },
+            email: { name: 'Email Services', color: '#f59e0b', icon: '📧' },
+            database: { name: 'Database', color: '#10b981', icon: '🗄️' },
+            file: { name: 'File Transfer', color: '#06b6d4', icon: '📁' },
+            vpn: { name: 'VPN/Security', color: '#14b8a6', icon: '🛡️' },
+            dns: { name: 'DNS Services', color: '#a855f7', icon: '🔍' },
+            iot: { name: 'IoT/Gaming', color: '#ec4899', icon: '🎮' },
+            enterprise: { name: 'Enterprise', color: '#6366f1', icon: '🏢' },
+            attack: { name: 'Attack Vectors', color: '#ef4444', icon: '⚠️' },
+        };
+        
+        const packetsData = [
+            // ========== WEB TRAFFIC ==========
+            { id: 'pkt1', category: 'web', protocol: 'TCP', port: 80, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'HTTP Web Request', desc: 'Standard plaintext web traffic' },
+            { id: 'pkt2', category: 'web', protocol: 'TCP', port: 443, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'HTTPS TLS 1.3', desc: 'Modern TLS 1.3 encrypted web traffic' },
+            { id: 'pkt8', category: 'web', protocol: 'TCP', port: 443, encrypted: true, encryptionType: 'weak', encryptionStrength: 'weak', malicious: false, name: 'HTTPS Weak Cipher', desc: 'TLS with deprecated cipher suite' },
+            { id: 'pkt10', category: 'web', protocol: 'UDP', port: 443, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'QUIC/HTTP3', desc: 'Modern QUIC protocol with TLS 1.3' },
+            { id: 'pkt11', category: 'web', protocol: 'TCP', port: 443, encrypted: true, encryptionType: 'ecdhe', encryptionStrength: 'strong', malicious: false, name: 'HTTPS ECDHE', desc: 'Elliptic Curve Diffie-Hellman Ephemeral' },
+            { id: 'pkt16', category: 'web', protocol: 'TCP', port: 8080, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'HTTP Proxy', desc: 'Alternative HTTP port for proxies' },
+            { id: 'pkt17', category: 'web', protocol: 'TCP', port: 8443, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'HTTPS Alt Port', desc: 'Alternative HTTPS on port 8443' },
+            { id: 'pkt18', category: 'web', protocol: 'TCP', port: 3000, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'Dev Server', desc: 'Local development server (React/Node)' },
+            
+            // ========== REMOTE ACCESS ==========
+            { id: 'pkt3', category: 'remote', protocol: 'TCP', port: 22, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'SSH AES-256', desc: 'Strong AES-256 encrypted shell access' },
+            { id: 'pkt9', category: 'remote', protocol: 'TCP', port: 22, encrypted: true, encryptionType: 'rsa2048', encryptionStrength: 'medium', malicious: false, name: 'SSH RSA-2048', desc: 'RSA 2048-bit key exchange' },
+            { id: 'pkt12', category: 'remote', protocol: 'TCP', port: 22, encrypted: true, encryptionType: 'chacha20', encryptionStrength: 'strong', malicious: false, name: 'SSH ChaCha20-Poly1305', desc: 'Modern stream cipher encryption' },
+            { id: 'pkt13', category: 'remote', protocol: 'TCP', port: 3389, encrypted: true, encryptionType: 'tls12', encryptionStrength: 'medium', malicious: false, name: 'RDP Connection', desc: 'Remote Desktop Protocol' },
+            { id: 'pkt19', category: 'remote', protocol: 'TCP', port: 23, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'Telnet', desc: 'Unencrypted legacy remote access' },
+            { id: 'pkt20', category: 'remote', protocol: 'TCP', port: 5900, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'VNC', desc: 'Virtual Network Computing (plaintext)' },
+            { id: 'pkt21', category: 'remote', protocol: 'TCP', port: 5900, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'VNC over TLS', desc: 'Encrypted VNC tunnel' },
+            
+            // ========== EMAIL SERVICES ==========
+            { id: 'pkt15', category: 'email', protocol: 'TCP', port: 25, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'SMTP Email', desc: 'Unencrypted email transmission' },
+            { id: 'pkt22', category: 'email', protocol: 'TCP', port: 587, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'SMTP TLS', desc: 'STARTTLS encrypted email submission' },
+            { id: 'pkt23', category: 'email', protocol: 'TCP', port: 465, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'SMTP SSL', desc: 'Implicit TLS email' },
+            { id: 'pkt24', category: 'email', protocol: 'TCP', port: 110, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'POP3', desc: 'Post Office Protocol v3 (plaintext)' },
+            { id: 'pkt25', category: 'email', protocol: 'TCP', port: 995, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'POP3S', desc: 'Secure POP3 over TLS' },
+            { id: 'pkt26', category: 'email', protocol: 'TCP', port: 143, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'IMAP', desc: 'Internet Message Access Protocol' },
+            { id: 'pkt27', category: 'email', protocol: 'TCP', port: 993, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'IMAPS', desc: 'Secure IMAP over TLS' },
+            
+            // ========== DATABASE ==========
+            { id: 'pkt28', category: 'database', protocol: 'TCP', port: 3306, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'MySQL', desc: 'MySQL database connection' },
+            { id: 'pkt29', category: 'database', protocol: 'TCP', port: 3306, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'MySQL SSL', desc: 'Encrypted MySQL over TLS' },
+            { id: 'pkt30', category: 'database', protocol: 'TCP', port: 5432, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'PostgreSQL', desc: 'PostgreSQL database' },
+            { id: 'pkt31', category: 'database', protocol: 'TCP', port: 5432, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'PostgreSQL TLS', desc: 'Encrypted PostgreSQL' },
+            { id: 'pkt32', category: 'database', protocol: 'TCP', port: 27017, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'MongoDB', desc: 'MongoDB NoSQL database' },
+            { id: 'pkt33', category: 'database', protocol: 'TCP', port: 6379, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'Redis', desc: 'Redis in-memory database' },
+            { id: 'pkt34', category: 'database', protocol: 'TCP', port: 1433, encrypted: true, encryptionType: 'tls12', encryptionStrength: 'medium', malicious: false, name: 'SQL Server', desc: 'Microsoft SQL Server' },
+            
+            // ========== FILE TRANSFER ==========
+            { id: 'pkt35', category: 'file', protocol: 'TCP', port: 21, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'FTP', desc: 'File Transfer Protocol (plaintext)' },
+            { id: 'pkt36', category: 'file', protocol: 'TCP', port: 990, encrypted: true, encryptionType: 'tls12', encryptionStrength: 'medium', malicious: false, name: 'FTPS', desc: 'FTP over TLS' },
+            { id: 'pkt37', category: 'file', protocol: 'TCP', port: 22, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'SFTP', desc: 'SSH File Transfer Protocol' },
+            { id: 'pkt38', category: 'file', protocol: 'TCP', port: 445, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'SMB', desc: 'Server Message Block file sharing' },
+            { id: 'pkt39', category: 'file', protocol: 'TCP', port: 445, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'SMB3 Encrypted', desc: 'SMB3 with encryption' },
+            { id: 'pkt40', category: 'file', protocol: 'UDP', port: 69, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'TFTP', desc: 'Trivial File Transfer Protocol' },
+            
+            // ========== VPN/SECURITY ==========
+            { id: 'pkt14', category: 'vpn', protocol: 'UDP', port: 500, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'IPSec VPN', desc: 'Internet Protocol Security tunnel' },
+            { id: 'pkt41', category: 'vpn', protocol: 'UDP', port: 1194, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'OpenVPN', desc: 'OpenVPN secure tunnel' },
+            { id: 'pkt42', category: 'vpn', protocol: 'UDP', port: 51820, encrypted: true, encryptionType: 'chacha20', encryptionStrength: 'strong', malicious: false, name: 'WireGuard', desc: 'Modern lightweight VPN' },
+            { id: 'pkt43', category: 'vpn', protocol: 'TCP', port: 1723, encrypted: true, encryptionType: 'weak', encryptionStrength: 'weak', malicious: false, name: 'PPTP VPN', desc: 'Point-to-Point Tunneling (deprecated)' },
+            
+            // ========== DNS SERVICES ==========
+            { id: 'pkt4', category: 'dns', protocol: 'UDP', port: 53, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'DNS Query', desc: 'Domain name resolution' },
+            { id: 'pkt44', category: 'dns', protocol: 'TCP', port: 853, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'DNS over TLS', desc: 'Encrypted DNS (DoT)' },
+            { id: 'pkt45', category: 'dns', protocol: 'TCP', port: 443, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'DNS over HTTPS', desc: 'DNS over HTTPS (DoH)' },
+            
+            // ========== IoT/GAMING ==========
+            { id: 'pkt46', category: 'iot', protocol: 'TCP', port: 1883, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'MQTT', desc: 'IoT Message Queue Telemetry' },
+            { id: 'pkt47', category: 'iot', protocol: 'TCP', port: 8883, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'MQTT over TLS', desc: 'Secure MQTT' },
+            { id: 'pkt48', category: 'iot', protocol: 'UDP', port: 5683, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'CoAP', desc: 'Constrained Application Protocol' },
+            { id: 'pkt49', category: 'iot', protocol: 'UDP', port: 27015, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'Steam Gaming', desc: 'Steam game server' },
+            
+            // ========== ENTERPRISE ==========
+            { id: 'pkt50', category: 'enterprise', protocol: 'TCP', port: 389, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'LDAP', desc: 'Lightweight Directory Access Protocol' },
+            { id: 'pkt51', category: 'enterprise', protocol: 'TCP', port: 636, encrypted: true, encryptionType: 'tls13', encryptionStrength: 'strong', malicious: false, name: 'LDAPS', desc: 'Secure LDAP' },
+            { id: 'pkt52', category: 'enterprise', protocol: 'TCP', port: 88, encrypted: true, encryptionType: 'aes256', encryptionStrength: 'strong', malicious: false, name: 'Kerberos', desc: 'Network authentication protocol' },
+            
+            // ========== ATTACK VECTORS ==========
+            { id: 'pkt5', category: 'attack', protocol: 'ICMP', port: 0, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: false, name: 'Ping Request', desc: 'Network diagnostic packet' },
+            { id: 'pkt6', category: 'attack', protocol: 'TCP', port: 443, encrypted: true, encryptionType: 'tls12', encryptionStrength: 'medium', malicious: true, name: 'Encrypted Malware TLS 1.2', desc: 'Ransomware payload with outdated TLS 1.2' },
+            { id: 'pkt7', category: 'attack', protocol: 'TCP', port: 80, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: true, name: 'SQL Injection', desc: 'Plaintext database attack' },
+            { id: 'pkt53', category: 'attack', protocol: 'TCP', port: 80, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: true, name: 'XSS Attack', desc: 'Cross-site scripting payload' },
+            { id: 'pkt54', category: 'attack', protocol: 'UDP', port: 53, encrypted: false, encryptionType: null, encryptionStrength: null, malicious: true, name: 'DNS Amplification', desc: 'DDoS attack vector' },
+            { id: 'pkt55', category: 'attack', protocol: 'TCP', port: 22, encrypted: true, encryptionType: 'weak', encryptionStrength: 'weak', malicious: true, name: 'SSH Brute Force', desc: 'Login credential attack' },
+        ];
+
+        // Themes
+        const appThemes = {
+            cyber: { name: 'Cyber Dark', bg: 'bg-slate-950', grid: 'laser-grid-blue', text: 'text-slate-100', header: 'bg-slate-900', sidebar: 'bg-slate-900', console: 'bg-slate-900', accent: 'sky', label: 'text-slate-400' },
+            light: { name: 'High Contrast', bg: 'bg-slate-100', grid: 'laser-grid-gray', text: 'text-slate-900', header: 'bg-white', sidebar: 'bg-white', console: 'bg-white', accent: 'blue', label: 'text-slate-600' },
+            matrix: { name: 'Matrix Core', bg: 'bg-zinc-950', grid: 'laser-grid-green', text: 'text-emerald-400', header: 'bg-black', sidebar: 'bg-black', console: 'bg-black', accent: 'emerald', label: 'text-emerald-800' }
+        };
+
+        // Firewall Profiles with Encryption Requirements
+        const firewallProfiles = {
+            webServer: { 
+                name: 'Public Web Server', 
+                allowed: [
+                    { proto: 'TCP', port: 80, requireEncryption: false },
+                    { proto: 'TCP', port: 443, requireEncryption: true, minStrength: 'medium' }
+                ]
+            },
+            secureBackend: { 
+                name: 'Secure Backend', 
+                allowed: [
+                    { proto: 'TCP', port: 22, requireEncryption: true, minStrength: 'strong', bannedTypes: ['weak'] },
+                    { proto: 'TCP', port: 443, requireEncryption: true, minStrength: 'strong', bannedTypes: ['weak', 'tls12'] }
+                ]
+            },
+            dnsServer: { 
+                name: 'DNS Resolver', 
+                allowed: [
+                    { proto: 'UDP', port: 53, requireEncryption: false },
+                    { proto: 'ICMP', port: 0, requireEncryption: false }
+                ]
+            },
+            zeroTrust: {
+                name: 'Zero Trust Zone',
+                allowed: [
+                    { proto: 'TCP', port: 443, requireEncryption: true, minStrength: 'strong', allowedTypes: ['tls13', 'aes256'] },
+                    { proto: 'UDP', port: 443, requireEncryption: true, minStrength: 'strong', allowedTypes: ['tls13'] }
+                ]
+            }
+        };
+
+        // --- GVM PACKET GEOMETRY RENDERER ---
+        const GVMPacket = ({ packet, size = 80 }) => {
+            if (!packet) return null;
+            
+            const cx = size / 2;
+            const cy = size / 2;
+            
+            // Protocol -> Base Shape & Color
+            const shapeProps = {
+                'TCP': { type: 'rect', color: '#3b82f6', fill: '#1e3a8a' },  // Blue, Armored Box
+                'UDP': { type: 'circle', color: '#10b981', fill: '#064e3b' }, // Green, Sphere
+                'ICMP': { type: 'polygon', color: '#f59e0b', fill: '#78350f', points: `${cx},10 ${size-10},${size-10} 10,${size-10}` } // Orange, Triangle
+            };
+            const visual = shapeProps[packet.protocol];
+
+            // Port -> Right-side Key Geometry
+            const renderKey = () => {
+                const ky = cy;
+                const kx = size - 15; // Protruding right
+                if (packet.port === 80) return <rect x={kx} y={ky-10} width="20" height="20" fill={visual.color} />; // Square key
+                if (packet.port === 443) return <polygon points={`${kx},${ky-12} ${kx+20},${ky} ${kx},${ky+12}`} fill={visual.color} />; // Wedge key
+                if (packet.port === 22) return <circle cx={kx+10} cy={ky} r="10" fill={visual.color} />; // Round key
+                if (packet.port === 53) return <polygon points={`${kx+5},${ky-10} ${kx+15},${ky-10} ${kx+20},${ky} ${kx+15},${ky+10} ${kx+5},${ky+10} ${kx},${ky}`} fill={visual.color}/>; // Hex key
+                return <line x1={kx} y1={ky} x2={kx+20} y2={ky} stroke={visual.color} strokeWidth="4" />; // Default line
+            };
+
+            return (
+                <div className="relative flex items-center justify-center pointer-events-none" style={{ width: size+20, height: size }}>
+                    <svg width={size+20} height={size} className="overflow-visible drop-shadow-lg">
+                        
+                        {/* 1. Encryption Rings (Layers) - Enhanced Visual Encoding */}
+                        {packet.encrypted && (() => {
+                            // Encryption Type -> Color Scheme
+                            const encColors = {
+                                'tls13': { primary: '#10b981', secondary: '#34d399', glow: '#059669' }, // Green - Modern/Secure
+                                'tls12': { primary: '#f59e0b', secondary: '#fbbf24', glow: '#d97706' }, // Orange - Deprecated
+                                'aes256': { primary: '#8b5cf6', secondary: '#a78bfa', glow: '#7c3aed' }, // Purple - Strong Symmetric
+                                'rsa2048': { primary: '#0ea5e9', secondary: '#38bdf8', glow: '#0284c7' }, // Blue - Asymmetric
+                                'weak': { primary: '#ef4444', secondary: '#f87171', glow: '#dc2626' }, // Red - Insecure
+                                'ecdhe': { primary: '#06b6d4', secondary: '#22d3ee', glow: '#0891b2' }, // Cyan - Elliptic Curve
+                                'chacha20': { primary: '#ec4899', secondary: '#f472b6', glow: '#db2777' }, // Pink - Modern Stream
+                            };
+                            const colors = encColors[packet.encryptionType] || { primary: '#64748b', secondary: '#94a3b8', glow: '#475569' };
+                            
+                            // Strength -> Number of Rings
+                            const rings = packet.encryptionStrength === 'strong' ? 3 : packet.encryptionStrength === 'medium' ? 2 : 1;
+                            
+                            return (
+                                <>
+                                    {Array.from({ length: rings }).map((_, i) => {
+                                        const radius = (size/2) + 8 + (i * 5);
+                                        const opacity = 1 - (i * 0.2);
+                                        const speed = 3 + (i * 2);
+                                        return (
+                                            <circle 
+                                                key={i}
+                                                cx={cx} cy={cy} r={radius} 
+                                                fill="none" 
+                                                stroke={i === 0 ? colors.primary : colors.secondary}
+                                                strokeWidth={3 - i * 0.5}
+                                                strokeDasharray={`${6 - i * 2} ${4 + i}`}
+                                                opacity={opacity}
+                                                className={`animate-[spin_${speed}s_linear_infinite${i % 2 === 0 ? '' : '_reverse'}]`}
+                                                style={{ filter: `drop-shadow(0 0 ${4 + i * 2}px ${colors.glow})` }}
+                                            />
+                                        );
+                                    })}
+                                    {/* Encryption Type Label */}
+                                    <text 
+                                        x={cx} y={cy - (size/2) - 15} 
+                                        textAnchor="middle" 
+                                        fill={colors.primary} 
+                                        fontSize={size/10} 
+                                        fontWeight="bold"
+                                        className="font-mono uppercase"
+                                    >
+                                        {packet.encryptionType}
+                                    </text>
+                                </>
+                            );
+                        })()}
+
+                        {/* 2. Base Shape (Protocol) */}
+                        {visual.type === 'rect' && <rect x="15" y="15" width={size-30} height={size-30} rx="4" fill={visual.fill} stroke={visual.color} strokeWidth="3" />}
+                        {visual.type === 'circle' && <circle cx={cx} cy={cy} r={(size/2)-15} fill={visual.fill} stroke={visual.color} strokeWidth="3" />}
+                        {visual.type === 'polygon' && <polygon points={visual.points} fill={visual.fill} stroke={visual.color} strokeWidth="3" />}
+
+                        {/* 3. Port Geometry (Key) */}
+                        {renderKey()}
+
+                        {/* 4. Intrusion/Payload Core */}
+                        {packet.malicious ? (
+                            <polygon points={`${cx},${cy-10} ${cx+3},${cy-3} ${cx+10},${cy} ${cx+3},${cy+3} ${cx},${cy+10} ${cx-3},${cy+3} ${cx-10},${cy} ${cx-3},${cy-3}`} fill="#ef4444" className="animate-pulse" />
+                        ) : (
+                            <circle cx={cx} cy={cy} r="4" fill="#cbd5e1" opacity="0.5" />
+                        )}
+                        
+                        {/* Label */}
+                        <text x={cx} y={cy+4} dominantBaseline="middle" textAnchor="middle" fill="#f8fafc" fontSize={size/6} fontWeight="bold" className="font-mono">{packet.protocol}</text>
+                    </svg>
+                </div>
+            );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const [activeProfile, setActiveProfile] = useState('webServer');
+            const [currentTheme, setCurrentTheme] = useState('cyber');
+            const [testResult, setTestResult] = useState(null);
+            const [dragOver, setDragOver] = useState(false);
+            const [draggingId, setDraggingId] = useState(null);
+            const [viewMode, setViewMode] = useState('main'); // 'main' or 'creator'
+            const [customPackets, setCustomPackets] = useState([]);
+            const [selectedCategory, setSelectedCategory] = useState('all'); // Category filter
+            
+            // NEW: Creator Lab States
+            const [creatorTab, setCreatorTab] = useState('base'); // 'base', 'port', 'encryption', 'complete'
+            const [shapeBuilder, setShapeBuilder] = useState({
+                baseShape: { shape: 'rect', width: 80, height: 60, color: '#3b82f6', borderRadius: 8 },
+                portKey: { visible: false, shape: 'square', x: 90, y: 90, size: 12, color: '#fbbf24' },
+                encryptionRings: [],
+                coreMarker: { visible: false, size: 20, color: '#ef4444' },
+                name: '',
+                protocol: 'TCP',
+                port: 443
+            });
+            const [selectedLayer, setSelectedLayer] = useState(null);
+
+            const handleDragStart = (e, id) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('pktId', id);
+                e.dataTransfer.setData('text/plain', id); // Fallback for some browsers
+                setDraggingId(id);
+            };
+            
+            const handleDragEnd = () => {
+                setDraggingId(null);
+                setDragOver(false);
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOver(false);
+                setDraggingId(null);
+                const id = e.dataTransfer.getData('pktId') || e.dataTransfer.getData('text/plain');
+                const allPackets = [...packetsData, ...customPackets];
+                const pkt = allPackets.find(p => p.id === id);
+                if (pkt) {
+                    // Reset animation trước khi chạy lại
+                    setTestResult(null);
+                    // Đợi DOM clear hoàn toàn
+                    setTimeout(() => {
+                        evaluateFirewall(pkt);
+                    }, 50);
+                }
+            };
+
+            // --- RULE ENGINE (ACCESS CONTROL LIST & IDS & ENCRYPTION VALIDATION) ---
+            const evaluateFirewall = (packet) => {
+                let res = {
+                    packet,
+                    status: 'drop', // default deny
+                    trad: "", gvm: "", animClass: "anim-drop",
+                    timestamp: Date.now() // Force animation replay
+                };
+
+                // 1. Intrusion Detection System (IDS) Check
+                if (packet.malicious) {
+                    res.status = 'quarantine';
+                    res.animClass = 'anim-quarantine relative z-50';
+                    res.trad = `CRITICAL: Malicious payload detected inside ${packet.protocol} packet on Port ${packet.port}. Connection terminated by IDS.`;
+                    res.gvm = `SIGNATURE MISMATCH: Hidden jagged core detected inside structural geometry. Firewall inspection engine encapsulates object in quarantine barrier to prevent network corruption.`;
+                } 
+                // 2. Access Control List (ACL) Check
+                else {
+                    const profile = firewallProfiles[activeProfile];
+                    const matchingRule = profile.allowed.find(rule => rule.proto === packet.protocol && rule.port === packet.port);
+                    
+                    if (!matchingRule) {
+                        res.status = 'drop';
+                        res.animClass = 'anim-drop';
+                        res.trad = `DENY: Implicit deny rule triggered. No matching rule for ${packet.protocol} on Port ${packet.port}.`;
+                        res.gvm = `CONTRADICTION: Wall barrier lacks a geometric keyhole matching Port ${packet.port}. Structural collision occurs; object shatters and is discarded.`;
+                    }
+                    // 3. Encryption Requirements Check (NEW!)
+                    else if (matchingRule.requireEncryption && !packet.encrypted) {
+                        res.status = 'drop';
+                        res.animClass = 'anim-drop';
+                        res.trad = `POLICY VIOLATION: Port ${packet.port} requires encryption. Plaintext traffic rejected.`;
+                        res.gvm = `ENCRYPTION REQUIREMENT FAILED: Firewall barrier detects absence of protective cryptographic rings around packet core. Unprotected geometry cannot pass through secured portal.`;
+                    }
+                    // 4. Encryption Strength Validation
+                    else if (matchingRule.minStrength && packet.encrypted) {
+                        const strengthOrder = { 'weak': 1, 'medium': 2, 'strong': 3 };
+                        const packetLevel = strengthOrder[packet.encryptionStrength] || 0;
+                        const requiredLevel = strengthOrder[matchingRule.minStrength] || 0;
+                        
+                        if (packetLevel < requiredLevel) {
+                            res.status = 'drop';
+                            res.animClass = 'anim-drop';
+                            res.trad = `ENCRYPTION WEAK: Packet encryption strength (${packet.encryptionStrength}) is below minimum required (${matchingRule.minStrength}). Connection rejected.`;
+                            res.gvm = `INSUFFICIENT LAYERING: Firewall scanner detects only ${packetLevel} cryptographic ring${packetLevel > 1 ? 's' : ''} around packet core, but barrier socket demands ${requiredLevel}+ protective layers. Geometric density check fails; packet bounces off.`;
+                        }
+                    }
+                    // 5. Banned Encryption Types Check
+                    else if (matchingRule.bannedTypes && packet.encrypted && matchingRule.bannedTypes.includes(packet.encryptionType)) {
+                        res.status = 'drop';
+                        res.animClass = 'anim-drop';
+                        res.trad = `DEPRECATED CIPHER: Encryption type "${packet.encryptionType}" is blacklisted by security policy. Connection refused.`;
+                        res.gvm = `INCOMPATIBLE RING SIGNATURE: Firewall detects forbidden cryptographic ring pattern (${packet.encryptionType}). Color frequency mismatch with barrier's resonance field triggers automatic rejection.`;
+                    }
+                    // 6. Allowed Encryption Types Whitelist
+                    else if (matchingRule.allowedTypes && packet.encrypted && !matchingRule.allowedTypes.includes(packet.encryptionType)) {
+                        res.status = 'drop';
+                        res.animClass = 'anim-drop';
+                        res.trad = `CIPHER NOT AUTHORIZED: Only ${matchingRule.allowedTypes.join(', ')} encryption allowed. Packet uses "${packet.encryptionType}". Denied.`;
+                        res.gvm = `WHITELIST VIOLATION: Cryptographic ring color spectrum (${packet.encryptionType}) does not match authorized frequency signatures. Barrier rejects non-whitelisted encryption geometry.`;
+                    }
+                    // 7. ALL CHECKS PASSED - ALLOW
+                    else {
+                        res.status = 'allow';
+                        res.animClass = 'anim-allow';
+                        const encInfo = packet.encrypted ? ` with ${packet.encryptionType} (${packet.encryptionStrength})` : '';
+                        res.trad = `SUCCESS: Packet matches ACL rule Allow ${packet.protocol} ANY -> Port ${packet.port}${encInfo}. All security checks passed.`;
+                        res.gvm = `PERFECT INTERLOCK: ${packet.protocol} object's geometric key (Port ${packet.port}) matches barrier socket. ${packet.encrypted ? `Cryptographic ring signatures verified: ${packet.encryptionStrength} ${packet.encryptionType} layers resonate with barrier's encryption field.` : ''} Packet geometry slides through cleanly.`;
+                    }
+                }
+                setTestResult(res);
+            };
+
+            const profile = firewallProfiles[activeProfile];
+            const theme = appThemes[currentTheme];
+
+            return (
+                <div className={`flex flex-col h-screen overflow-hidden ${theme.bg} ${theme.text} transition-colors duration-500`}>
+                    {/* Header */}
+                    <header className={`${theme.header} p-4 flex justify-between items-center shadow-lg border-b ${currentTheme==='light'?'border-slate-300':'border-slate-800'} z-20`}>
+                        <div className="flex items-center space-x-6">
+                            <div>
+                                <h1 className="text-xl font-bold flex items-center font-mono">
+                                    <svg className={`w-6 h-6 mr-3 text-${theme.accent}-500`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                                    GVM NetSec Engine
+                                    {viewMode === 'creator' && <span className={`ml-3 text-sm bg-${theme.accent}-600 px-3 py-1 rounded-full font-black`}>CREATOR LAB</span>}
+                                </h1>
+                                <p className={`text-[11px] ${currentTheme==='light'?'text-slate-700':'text-slate-400'} mt-1 font-mono uppercase tracking-widest font-bold`}>{viewMode === 'main' ? 'Geometric Firewall Analysis // Mode: [ACTIVE]' : 'Packet Shape Builder // Custom Geometry Design'}</p>
+                            </div>
+
+                            {/* Creator Lab Toggle Button */}
+                            <button onClick={() => setViewMode(viewMode === 'main' ? 'creator' : 'main')} className={`px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg ${
+                                viewMode === 'creator' ? `bg-slate-700 text-white hover:bg-slate-600` : `bg-${theme.accent}-600 text-white hover:bg-${theme.accent}-700`
+                            }`}>
+                                {viewMode === 'main' ? '🛠️ Open Creator Lab' : '← Back to Main'}
+                            </button>
+
+                            {/* Theme Switcher */}
+                            {viewMode === 'main' && (
+                            <div className="flex bg-slate-950/20 p-1 rounded-xl border border-white/10 space-x-1 shadow-inner">
+                                {Object.keys(appThemes).map(tk => (
+                                    <button key={tk} onClick={() => setCurrentTheme(tk)} 
+                                        className={`px-4 py-1.5 text-[11px] font-black rounded-lg transition-all ${currentTheme === tk ? `bg-${theme.accent}-600 text-white shadow-[0_0_15px_rgba(2,132,199,0.3)] scale-105` : 'text-slate-500 hover:text-slate-300'}`}>
+                                        {appThemes[tk].name}
+                                    </button>
+                                ))}
+                            </div>
+                            )}
+                        </div>
+
+                        {viewMode === 'main' && (
+                        <div className="flex space-x-3 font-mono text-sm">
+                            {Object.keys(firewallProfiles).map(key => (
+                                <button key={key} onClick={() => { setActiveProfile(key); setTestResult(null); }} 
+                                    className={`px-4 py-2 border-2 rounded-lg font-bold transition-all ${activeProfile === key ? `bg-${theme.accent}-600 border-${theme.accent}-500 text-white shadow-xl scale-105` : `${currentTheme==='light'?'bg-white border-slate-300 text-slate-700 hover:border-slate-500':'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}`}>
+                                    {firewallProfiles[key].name}
+                                </button>
+                            ))}
+                        </div>
+                        )}
+                    </header>
+
+                    <div className="flex flex-1 overflow-hidden">
+                        
+                        {viewMode === 'main' ? (
+                            <>
+                        {/* LEFT: Packet Inventory (Internet) */}
+                        <div className={`w-80 ${theme.sidebar} border-r ${currentTheme==='light'?'border-slate-300 shadow-2xl':'border-slate-800 shadow-2xl'} flex flex-col z-10 transition-colors duration-500`}>
+                            <div className={`px-5 py-4 text-xs font-black ${currentTheme==='light'?'text-blue-800 bg-slate-200':'text-sky-400 bg-slate-950'} uppercase tracking-[0.2em] border-b ${currentTheme==='light'?'border-slate-300':'border-slate-800'} shadow-sm`}>
+                                Packet Library
+                            </div>
+                            
+                            {/* Category Filter Tabs */}
+                            <div className={`px-3 py-3 border-b ${currentTheme==='light'?'border-slate-300 bg-slate-100':'border-slate-800 bg-slate-900/60'} overflow-x-auto custom-scroll`}>
+                                <div className="flex gap-2 flex-wrap">
+                                    <button onClick={() => setSelectedCategory('all')} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                                        selectedCategory === 'all' 
+                                            ? `bg-${theme.accent}-600 text-white shadow-md scale-105` 
+                                            : `${currentTheme==='light'?'bg-white text-slate-700 hover:bg-slate-200':'bg-slate-800 text-slate-300 hover:bg-slate-700'}`
+                                    }`}>
+                                        All ({packetsData.length + customPackets.length})
+                                    </button>
+                                    {Object.entries(packetCategories).map(([key, cat]) => {
+                                        const count = [...packetsData, ...customPackets].filter(p => p.category === key).length;
+                                        return (
+                                            <button key={key} onClick={() => setSelectedCategory(key)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap flex items-center gap-1 ${
+                                                selectedCategory === key 
+                                                    ? `text-white shadow-md scale-105` 
+                                                    : `${currentTheme==='light'?'bg-white text-slate-700 hover:bg-slate-200':'bg-slate-800 text-slate-300 hover:bg-slate-700'}`
+                                            }`} style={{ backgroundColor: selectedCategory === key ? cat.color : undefined }}>
+                                                <span>{cat.icon}</span>
+                                                <span>{cat.name}</span>
+                                                <span className="opacity-60">({count})</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            
+                            <div className={`flex-1 overflow-y-auto p-5 space-y-4 custom-scroll ${currentTheme==='light'?'bg-slate-50':'bg-slate-900/40'}`}>
+                                {[...packetsData, ...customPackets]
+                                    .filter(pkt => selectedCategory === 'all' || pkt.category === selectedCategory)
+                                    .map(pkt => (
+                                    <div key={pkt.id} 
+                                        draggable="true"
+                                        onDragStart={(e) => handleDragStart(e, pkt.id)}
+                                        onDragEnd={handleDragEnd}
+                                        style={{ WebkitUserDrag: 'element' }}
+                                        className={`border-2 rounded-xl p-4 shadow-sm transition-all hover:translate-x-2 flex items-center group relative overflow-hidden select-none ${
+                                            draggingId === pkt.id 
+                                                ? 'opacity-50 scale-95 cursor-grabbing' 
+                                                : 'cursor-grab active:scale-95 active:cursor-grabbing'
+                                        } ${currentTheme==='light' ? 'bg-white border-slate-200 hover:border-blue-500 hover:shadow-md' : 'bg-slate-800/80 border-slate-700 hover:border-sky-500 hover:bg-slate-800'}`}>
+                                        
+                                        {/* Danger Stripe BG for malicious */}
+                                        {pkt.malicious && <div className="absolute inset-0 opacity-20 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#ef4444_10px,#ef4444_20px)] animate-pulse pointer-events-none"></div>}
+                                        
+                                        <div className="w-16 flex-shrink-0 flex items-center justify-center transform transition group-hover:rotate-12 duration-300 pointer-events-none">
+                                            <GVMPacket packet={pkt} size={54} />
+                                        </div>
+                                        <div className="ml-4 z-10 pointer-events-none">
+                                            <div className="text-sm font-black tracking-tight">{pkt.name}</div>
+                                            <div className="text-xs font-bold opacity-70 font-mono mt-1 flex items-center gap-2">
+                                                <span className={`px-1 rounded ${currentTheme==='light'?'bg-slate-100':'bg-black/30'}`}>{pkt.protocol}</span>
+                                                <span className={`${currentTheme==='light'?'text-blue-600':'text-sky-500'}`}>{pkt.port}</span>
+                                                {pkt.encrypted && (
+                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                                        pkt.encryptionStrength === 'strong' ? 'bg-green-600 text-white' :
+                                                        pkt.encryptionStrength === 'medium' ? 'bg-orange-600 text-white' :
+                                                        'bg-red-600 text-white'
+                                                    }`}>
+                                                        🔒 {pkt.encryptionType}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* RIGHT: Firewall & Analysis Zone */}
+                        <div className={`flex-1 flex flex-col relative ${theme.bg} ${theme.grid} transition-colors duration-1000`}>
+                            
+                            {/* Visual Action Area */}
+                            <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                                
+                                {/* The Drop Zone Indicator */}
+                                <div 
+                                    onDragOver={(e) => { 
+                                        e.preventDefault(); 
+                                        e.dataTransfer.dropEffect = 'move';
+                                        setDragOver(true); 
+                                    }} 
+                                    onDragLeave={() => setDragOver(false)}
+                                    onDrop={handleDrop}
+                                    className={`absolute inset-20 flex items-center justify-center border-4 border-dashed rounded-[40px] transition-all duration-300 z-0 
+                                        ${dragOver ? `border-${theme.accent}-500 bg-${theme.accent}-500/10 scale-[1.02]` : `${currentTheme==='light'?'border-slate-300 opacity-80':'border-slate-800 opacity-40'}`}`}
+                                >
+                                    <div className="text-center pointer-events-none select-none">
+                                        <div className={`text-6xl font-black ${currentTheme==='light'?'text-slate-300':'text-slate-800'} uppercase tracking-[0.5em] mb-4`}>INJECT</div>
+                                        <p className={`${currentTheme==='light'?'text-slate-400':'text-slate-700'} font-bold tracking-widest`}>DROP PACKET INTO ENGINE FOR INSPECTION</p>
+                                    </div>
+                                </div>
+                                
+                                {/* The Firewall Barrier */}
+                                <div className={`absolute left-[50%] w-14 h-96 ${currentTheme==='light'?'bg-slate-300 border-slate-400':'bg-slate-800 border-slate-700'} border-2 rounded-2xl flex flex-col justify-around items-center shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-20 transition-all duration-500`}>
+                                    {profile.allowed.map((rule, idx) => {
+                                        const getHoleShape = (port) => {
+                                            const color = currentTheme==='light' ? 'bg-slate-100' : 'bg-slate-950';
+                                            const border = currentTheme==='light' ? 'border-t-slate-100' : 'border-t-slate-950';
+                                            if (port === 80) return `w-8 h-8 ${color} shadow-inner rounded-sm`; 
+                                            if (port === 443) return `w-0 h-0 border-l-[16px] border-l-transparent border-r-[16px] border-r-transparent border-t-[24px] ${border} -rotate-90`; 
+                                            if (port === 22) return `w-8 h-8 rounded-full ${color} shadow-inner`; 
+                                            if (port === 53) return `w-8 h-9 ${color} clip-hex shadow-inner`; 
+                                            return `w-8 h-3 ${color} rounded-sm shadow-inner`;
+                                        };
+                                        
+                                        // Encryption requirement visual indicator
+                                        const getEncryptionGlow = () => {
+                                            if (!rule.requireEncryption) return '';
+                                            const strengthColors = {
+                                                'strong': 'shadow-[0_0_15px_#10b981,inset_0_0_10px_#10b981]',
+                                                'medium': 'shadow-[0_0_12px_#f59e0b,inset_0_0_8px_#f59e0b]',
+                                                'weak': 'shadow-[0_0_8px_#ef4444,inset_0_0_6px_#ef4444]'
+                                            };
+                                            return strengthColors[rule.minStrength] || 'shadow-[0_0_10px_#0ea5e9,inset_0_0_8px_#0ea5e9]';
+                                        };
+                                        
+                                        return (
+                                            <div key={idx} className="relative group flex items-center justify-center w-full h-14">
+                                                <div className={`${getHoleShape(rule.port)} ${getEncryptionGlow()}`} style={rule.port===53?{clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'}:{}}></div>
+                                                
+                                                {/* Encryption rings around the keyhole */}
+                                                {rule.requireEncryption && (
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                        <svg width="50" height="50" className="overflow-visible">
+                                                            {Array.from({ length: rule.minStrength === 'strong' ? 3 : rule.minStrength === 'medium' ? 2 : 1 }).map((_, i) => (
+                                                                <circle 
+                                                                    key={i}
+                                                                    cx="25" cy="25" 
+                                                                    r={18 + (i * 4)} 
+                                                                    fill="none" 
+                                                                    stroke={rule.minStrength === 'strong' ? '#10b981' : rule.minStrength === 'medium' ? '#f59e0b' : '#ef4444'}
+                                                                    strokeWidth="1"
+                                                                    strokeDasharray="3 2"
+                                                                    opacity={0.5 - (i * 0.1)}
+                                                                    className={`animate-[spin_${2 + i}s_linear_infinite${i % 2 ? '_reverse' : ''}]`}
+                                                                />
+                                                            ))}\n                                                        </svg>
+                                                    </div>
+                                                )}
+                                                
+                                                <div className={`absolute left-16 text-xs font-black px-3 py-1.5 rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 transition-all z-50 ${currentTheme==='light'?'bg-white text-blue-700 border-2 border-slate-200':'bg-slate-900 border border-sky-400 text-sky-400'} w-64`}>
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="opacity-50 text-[10px]">PORT {rule.port}</span>
+                                                        <span className={`px-2 py-0.5 rounded text-[9px] ${rule.proto === 'TCP' ? 'bg-blue-600' : rule.proto === 'UDP' ? 'bg-green-600' : 'bg-orange-600'} text-white`}>{rule.proto}</span>
+                                                    </div>
+                                                    {rule.requireEncryption && (
+                                                        <div className="text-[10px] mt-1 space-y-0.5 border-t border-current/20 pt-1">
+                                                            <div>🔒 Encryption: <span className="text-green-400">REQUIRED</span></div>\n                                                            {rule.minStrength && <div>Strength: ≥<span className="uppercase font-black">{rule.minStrength}</span></div>}
+                                                            {rule.allowedTypes && <div>Types: {rule.allowedTypes.join(', ')}</div>}
+                                                            {rule.bannedTypes && <div className="text-red-400">Banned: {rule.bannedTypes.join(', ')}</div>}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                    {/* Status Glow Line */}
+                                    <div className={`absolute -inset-y-6 w-1.5 -left-1.5 rounded-full transition-all duration-300 ${testResult?.status === 'allow' ? 'bg-green-500 shadow-[0_0_25px_#22c55e]' : testResult?.status === 'drop' ? 'bg-red-500 shadow-[0_0_25px_#ef4444]' : 'bg-transparent'}`}></div>
+                                </div>
+
+                                {/* Nodes & Interaction Layer */}
+                                <div className="absolute inset-0 flex items-center justify-between p-24 pointer-events-none z-10">
+                                    <div className="flex flex-col items-center group">
+                                        <div className={`p-6 rounded-full border-2 mb-4 transition-all duration-500 ${currentTheme==='light'?'bg-white border-slate-300 text-slate-400 shadow-xl':'bg-slate-900 border-slate-700 text-slate-600'}`}>
+                                            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                                        </div>
+                                        <span className={`text-[11px] uppercase tracking-[0.3em] font-black ${theme.label}`}>Public WAN</span>
+                                    </div>
+
+                                    <div className="flex-1 relative h-32 flex items-center justify-center">
+                                        {testResult && (
+                                            <div key={`${testResult.packet.id}-${testResult.timestamp}`} className={`absolute left-[20%] ${testResult.animClass}`}>
+                                                <GVMPacket packet={testResult.packet} size={90} />
+                                                {testResult.status === 'quarantine' && <div className="quarantine-bubble"></div>}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-col items-center">
+                                        <div className={`p-6 rounded-full border-2 mb-4 transition-all duration-500 ${currentTheme==='light'?'bg-white border-slate-300 text-slate-400 shadow-xl':'bg-slate-900 border-slate-700 text-slate-600'}`}>
+                                            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                                        </div>
+                                        <span className={`text-[11px] uppercase tracking-[0.3em] font-black ${theme.label}`}>Secured LAN</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Analysis Console */}
+                            <div className={`h-72 ${theme.console} border-t-2 ${currentTheme==='light'?'border-slate-300 shadow-2xl':'border-slate-800'} p-6 font-mono flex flex-col z-30 transition-colors duration-500`}>
+                                <div className={`flex items-center justify-between mb-4 border-b-2 pb-3 ${currentTheme==='light'?'text-blue-900 border-slate-200':'text-sky-400 border-slate-800'}`}>
+                                    <div className="text-xs font-black uppercase tracking-[0.2em] flex items-center">
+                                        <div className={`w-2 h-2 rounded-full mr-3 animate-pulse ${currentTheme==='light'?'bg-blue-600':'bg-sky-400'}`}></div>
+                                        Structural Analysis Engine // {profile.name}
+                                    </div>
+                                    <div className="text-[10px] opacity-40">KRNL_V.2.0.44</div>
+                                </div>
+                                
+                                {testResult ? (
+                                    <div className="flex-1 flex gap-8">
+                                        <div className="w-1/2 flex flex-col">
+                                            <div className={`text-[11px] mb-2 font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-500':'text-slate-500'}`}>_Traditional Access Logs</div>
+                                            <div className={`flex-1 rounded-xl p-5 text-sm border-2 shadow-inner leading-relaxed font-bold transition-all ${testResult.status === 'allow' ? 'bg-green-600/5 border-green-500/30 text-green-700' : testResult.status === 'quarantine' ? 'bg-red-600/5 border-red-500/30 text-red-600' : `${currentTheme==='light'?'bg-slate-100 border-slate-200 text-slate-800':'bg-slate-800/50 border-slate-700 text-slate-300'}`}`}>
+                                                <span className={`inline-block px-2 py-0.5 rounded text-[10px] mb-3 border-2 ${testResult.status === 'allow' ? 'bg-green-600 text-white border-green-500' : 'bg-red-600 text-white border-red-500'}`}>{testResult.status.toUpperCase()}</span>
+                                                <br/>
+                                                {testResult.trad}
+                                            </div>
+                                        </div>
+
+                                        <div className="w-1/2 flex flex-col">
+                                            <div className={`text-[11px] mb-2 font-black uppercase tracking-wider ${currentTheme==='light'?'text-blue-600':'text-sky-500'}`}>_GVM Geometry evaluation</div>
+                                            <div className={`flex-1 rounded-xl p-5 text-sm border-2 shadow-inner leading-relaxed font-bold transition-all ${testResult.status === 'allow' ? 'bg-green-600/5 border-green-500/40 text-green-700' : testResult.status === 'quarantine' ? 'bg-red-600/5 border-red-500/40 text-red-700' : `${currentTheme==='light'?'bg-slate-100 border-slate-200 text-slate-800':'bg-slate-800/50 border-slate-700 text-slate-300'}`}`}>
+                                                {testResult.gvm}
+                                                {testResult.status === 'quarantine' && (
+                                                    <button onClick={() => setTestResult(null)} className="block mt-6 text-[10px] font-black bg-red-600 text-white px-5 py-2.5 rounded-xl hover:bg-red-700 shadow-xl border-2 border-red-400 transition-all uppercase tracking-widest active:scale-95">Clear Quarantine Barrier</button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-sm font-bold tracking-widest">
+                                        <div className="w-12 h-0.5 bg-current mb-4 animate-bounce"></div>
+                                        <span className="uppercase">Establishing connection... Inject packet for telemetry</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                            </>
+                        ) : (
+                            // CREATOR LAB - Full-page 3-panel shape builder
+                            <div className="flex-1 flex flex-col">
+                                {/* Creator Lab Header with Step Navigation */}
+                                <div className={`px-6 py-4 ${currentTheme==='light'?'bg-slate-100 border-b border-slate-300':'bg-slate-900 border-b border-slate-700'} flex items-center justify-between`}>
+                                    <div className="flex items-center gap-6">
+                                        {['base', 'port', 'encryption', 'complete'].map((tab) => (
+                                            <button key={tab} onClick={() => setCreatorTab(tab)} className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${creatorTab === tab ? `${currentTheme==='light'?'bg-blue-600 text-white shadow-lg':'bg-sky-600 text-white shadow-lg'}` : `${currentTheme==='light'?'bg-white text-slate-600 hover:bg-slate-50':'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}`}>
+                                                {tab === 'base' ? '1. Base Shape' : tab === 'port' ? '2. Port Key' : tab === 'encryption' ? '3. Encryption' : '4. Complete'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className={`text-xs font-bold uppercase tracking-wider ${currentTheme==='light'?'text-slate-500':'text-slate-400'}`}>
+                                        Packet Shape Builder
+                                    </div>
+                                </div>
+
+                                {/* 3-Panel Layout */}
+                                <div className="flex-1 flex overflow-hidden">
+                                    
+                                    {/* LEFT PANEL: Component Selector & Library */}
+                                    <div className={`w-80 ${currentTheme==='light'?'bg-white border-r border-slate-300':'bg-slate-900 border-r border-slate-700'} overflow-y-auto p-6 space-y-6`}>
+                                        
+                                        {creatorTab === 'base' && (
+                                            <>
+                                                <div>
+                                                    <div className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-3`}>Protocol Shape</div>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {[
+                                                            { shape: 'rect', label: 'TCP (Rect)', color: '#3b82f6' },
+                                                            { shape: 'circle', label: 'UDP (Circle)', color: '#10b981' },
+{ shape: 'polygon', label: 'ICMP (Triangle)', color: '#f59e0b' },
+                                                            { shape: 'hexagon', label: 'Custom', color: '#8b5cf6' }
+                                                        ].map(s => (
+                                                            <button key={s.shape} onClick={() => setShapeBuilder({...shapeBuilder, baseShape: {...shapeBuilder.baseShape, shape: s.shape, color: s.color}})} className={`p-3 rounded-lg border-2 text-xs font-bold transition-all ${shapeBuilder.baseShape.shape === s.shape ? `border-blue-600 bg-blue-50 shadow-lg` : `${currentTheme==='light'?'border-slate-200 hover:border-slate-300':'border-slate-700 hover:border-slate-600'}`}`}>
+                                                                <div style={{width: '40px', height: '40px', margin: '0 auto 8px', background: s.color, borderRadius: s.shape === 'circle' ? '50%' : '4px', clipPath: s.shape === 'polygon' ? 'polygon(50% 0%, 100% 100%, 0% 100%)' : s.shape === 'hexagon' ? 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' : 'none'}}></div>
+                                                                {s.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                
+                                                <div>
+                                                    <div className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-3`}>Shape Color</div>
+                                                    <div className="grid grid-cols-4 gap-2">
+                                                        {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'].map(c => (
+                                                            <button key={c} onClick={() => setShapeBuilder({...shapeBuilder, baseShape: {...shapeBuilder.baseShape, color: c}})} className={`w-12 h-12 rounded-lg border-4 transition-all ${shapeBuilder.baseShape.color === c ? 'border-white shadow-lg scale-110' : 'border-transparent opacity-70 hover:opacity-100'}`} style={{backgroundColor: c}}></button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {creatorTab === 'port' && (
+                                            <>
+                                                <div>
+                                                    <div className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-3 flex items-center justify-between`}>
+                                                        <span>Port Key Geometry</span>
+                                                        <button onClick={() => setShapeBuilder({...shapeBuilder, portKey: {...shapeBuilder.portKey, visible: !shapeBuilder.portKey.visible}})} className={`px-2 py-1 rounded text-[9px] font-black ${shapeBuilder.portKey.visible ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-700'}`}>
+                                                            {shapeBuilder.portKey.visible ? 'ON' : 'OFF'}
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    {shapeBuilder.portKey.visible && (
+                                                        <>
+                                                            <div className="space-y-2 mb-4">
+                                                                <div className="grid grid-cols-3 gap-2">
+                                                                    {['square', 'circle', 'triangle', 'hexagon', 'wedge'].map(shape => (
+                                                                        <button key={shape} onClick={() => setShapeBuilder({...shapeBuilder, portKey: {...shapeBuilder.portKey, shape}})} className={`p-2 rounded border-2 text-[10px] font-bold ${shapeBuilder.portKey.shape === shape ? 'border-blue-600 bg-blue-50' : 'border-slate-200'}`}>
+                                                                            {shape.toUpperCase()}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div className="space-y-3">
+                                                                <div>
+                                                                    <label className={`text-[10px] font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'}`}>Position X: {shapeBuilder.portKey.x}px</label>
+                                                                    <input type="range" min="0" max="180" value={shapeBuilder.portKey.x} onChange={(e) => setShapeBuilder({...shapeBuilder, portKey: {...shapeBuilder.portKey, x: parseInt(e.target.value)}})} className="w-full" />
+                                                                </div>
+                                                                <div>
+                                                                    <label className={`text-[10px] font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'}`}>Position Y: {shapeBuilder.portKey.y}px</label>
+                                                                    <input type="range" min="0" max="180" value={shapeBuilder.portKey.y} onChange={(e) => setShapeBuilder({...shapeBuilder, portKey: {...shapeBuilder.portKey, y: parseInt(e.target.value)}})} className="w-full" />
+                                                                </div>
+                                                                <div>
+                                                                    <label className={`text-[10px] font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'}`}>Size: {shapeBuilder.portKey.size}px</label>
+                                                                    <input type="range" min="8" max="30" value={shapeBuilder.portKey.size} onChange={(e) => setShapeBuilder({...shapeBuilder, portKey: {...shapeBuilder.portKey, size: parseInt(e.target.value)}})} className="w-full" />
+                                                                </div>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {creatorTab === 'encryption' && (
+                                            <>
+                                                <div>
+                                                    <div className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-3 flex items-center justify-between`}>
+                                                        <span>Encryption Rings</span>
+                                                        <button onClick={() => setShapeBuilder({...shapeBuilder, encryptionRings: [...shapeBuilder.encryptionRings, {id: Date.now(), radius: 50, color: '#10b981', strokeWidth: 2}]})} className={`px-2 py-1 rounded text-[9px] font-black ${currentTheme==='light'?'bg-blue-600':'bg-sky-600'} text-white`}>
+                                                            + ADD RING
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <div className="space-y-2 mb-4">
+                                                        {shapeBuilder.encryptionRings.map((ring, idx) => (
+                                                            <div key={ring.id} className={`p-2 rounded border-2 cursor-pointer transition-all ${selectedLayer === `ring-${ring.id}` ? 'border-blue-600 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`} onClick={() => setSelectedLayer(`ring-${ring.id}`)}>
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-xs font-bold">Ring {idx + 1}</span>
+                                                                    <button onClick={(e) => { e.stopPropagation(); setShapeBuilder({...shapeBuilder, encryptionRings: shapeBuilder.encryptionRings.filter(r => r.id !== ring.id)}); }} className="px-2 py-0.5 bg-red-600 text-white rounded text-[9px] font-bold">DEL</button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    
+                                                    <div>
+                                                        <label className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-2 block`}>Malicious Core</label>
+                                                        <button onClick={() => setShapeBuilder({...shapeBuilder, coreMarker: {...shapeBuilder.coreMarker, visible: !shapeBuilder.coreMarker.visible}})} className={`w-full px-3 py-2 rounded-lg font-bold text-sm transition-all ${shapeBuilder.coreMarker.visible ? 'bg-red-600 text-white' : `${currentTheme==='light'?'bg-slate-200 text-slate-700':'bg-slate-700 text-slate-300'}`}`}>
+                                                            {shapeBuilder.coreMarker.visible ? '☠️ MALICIOUS ENABLED' : 'Enable Malicious Core'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {creatorTab === 'complete' && (
+                                            <>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-1`}>Packet Name</label>
+                                                        <input type="text" value={shapeBuilder.name} onChange={(e) => setShapeBuilder({...shapeBuilder, name: e.target.value})} placeholder="My Custom Packet" className={`w-full px-3 py-2 rounded border ${currentTheme==='light'?'bg-white border-slate-300':'bg-slate-800 border-slate-600 text-white'} text-sm`} />
+                                                    </div>
+                                                    
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-1`}>Protocol</label>
+                                                            <select value={shapeBuilder.protocol} onChange={(e) => setShapeBuilder({...shapeBuilder, protocol: e.target.value})} className={`w-full px-2 py-2 rounded border ${currentTheme==='light'?'bg-white border-slate-300':'bg-slate-800 border-slate-600 text-white'} text-sm`}>
+                                                                <option>TCP</option>
+                                                                <option>UDP</option>
+                                                                <option>ICMP</option>
+                                                            </select>
+                                                        </div>
+                                                        <div>
+                                                            <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-1`}>Port</label>
+                                                            <input type="number" value={shapeBuilder.port} onChange={(e) => setShapeBuilder({...shapeBuilder, port: parseInt(e.target.value)})} className={`w-full px-2 py-2 rounded border ${currentTheme==='light'?'bg-white border-slate-300':'bg-slate-800 border-slate-600 text-white'} text-sm`} />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <button onClick={() => {
+                                                        if (shapeBuilder.name) {
+                                                            const newPacket = {
+                                                                id: `custom_${Date.now()}`,
+                                                                name: shapeBuilder.name,
+                                                                protocol: shapeBuilder.protocol,
+                                                                port: shapeBuilder.port,
+                                                                encrypted: shapeBuilder.encryptionRings.length > 0,
+                                                                encryptionType: 'custom',
+                                                                encryptionStrength: shapeBuilder.encryptionRings.length >= 3 ? 'strong' : shapeBuilder.encryptionRings.length >= 2 ? 'medium' : 'weak',
+                                                                malicious: shapeBuilder.coreMarker.visible,
+                                                                customShape: {...shapeBuilder},
+                                                                desc: 'User-defined custom packet with geometry'
+                                                            };
+                                                            setCustomPackets([...customPackets, newPacket]);
+                                                            setViewMode('main');
+                                                            setShapeBuilder({
+                                                                baseShape: { shape: 'rect', width: 80, height: 60, color: '#3b82f6', borderRadius: 8 },
+                                                                portKey: { visible: false, shape: 'square', x: 90, y: 90, size: 12, color: '#fbbf24' },
+                                                                encryptionRings: [],
+                                                                coreMarker: { visible: false, size: 20, color: '#ef4444' },
+                                                                name: '', protocol: 'TCP', port: 443
+                                                            });
+                                                        }
+                                                    }} className={`w-full py-3 rounded-lg font-black text-sm transition-all ${currentTheme==='light'?'bg-blue-600 hover:bg-blue-700':'bg-sky-600 hover:bg-sky-700'} text-white shadow-lg`}>
+                                                        💾 SAVE TO LIBRARY
+                                                    </button>
+                                                    
+                                                    <div className={`p-4 rounded-lg border-2 ${currentTheme==='light'?'bg-blue-50 border-blue-200 text-blue-900':'bg-slate-800 border-sky-600 text-sky-300'} text-xs leading-relaxed`}>
+                                                        <div className="font-black mb-2">📐 Custom Shape Summary</div>
+                                                        <div className="space-y-1 text-[10px] opacity-90">
+                                                            <div><strong>Base:</strong> {shapeBuilder.baseShape.shape} ({shapeBuilder.baseShape.width}×{shapeBuilder.baseShape.height}px)</div>
+                                                            <div><strong>Port Key:</strong> {shapeBuilder.portKey.visible ? `${shapeBuilder.portKey.shape} @ (${shapeBuilder.portKey.x}, ${shapeBuilder.portKey.y})` : 'None'}</div>
+                                                            <div><strong>Encryption:</strong> {shapeBuilder.encryptionRings.length} ring(s)</div>
+                                                            <div><strong>Malicious:</strong> {shapeBuilder.coreMarker.visible ? 'Yes' : 'No'}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                        
+                                    </div>
+
+                                    {/* CENTER PANEL: Live Canvas */}
+                                    <div className={`flex-1 flex flex-col items-center justify-center ${currentTheme==='light'?'bg-gradient-to-br from-slate-50 to-slate-100':'bg-gradient-to-br from-slate-900 to-slate-800'} p-12`}>
+                                        <div className={`text-xs font-black uppercase tracking-wider ${currentTheme==='light'?'text-slate-500':'text-slate-400'} mb-6`}>Live Preview</div>
+                                        
+                                        <div className={`p-6 rounded-2xl border-4 shadow-2xl ${currentTheme==='light'?'bg-white border-slate-200':'bg-slate-800 border-slate-700'}`}>
+                                            <svg width="200" height="200" viewBox="0 0 200 200" className="overflow-visible">
+                                                {/* Encryption Rings */}
+                                                {shapeBuilder.encryptionRings.map((ring, idx) => (
+                                                    <circle key={ring.id} cx="100" cy="100" r={ring.radius} fill="none" stroke={ring.color} strokeWidth={ring.strokeWidth} strokeDasharray={selectedLayer === `ring-${ring.id}` ? "5 3" : "none"} opacity={0.7} />
+                                                ))}
+                                                
+                                                {/* Base Shape */}
+                                                {shapeBuilder.baseShape.shape === 'rect' && (
+                                                    <rect x={100 - shapeBuilder.baseShape.width/2} y={100 - shapeBuilder.baseShape.height/2} width={shapeBuilder.baseShape.width} height={shapeBuilder.baseShape.height} fill={shapeBuilder.baseShape.color} rx={shapeBuilder.baseShape.borderRadius} stroke="#000" strokeWidth="2" opacity="0.9" />
+                                                )}
+                                                {shapeBuilder.baseShape.shape === 'circle' && (
+                                                    <circle cx="100" cy="100" r={Math.min(shapeBuilder.baseShape.width, shapeBuilder.baseShape.height)/2} fill={shapeBuilder.baseShape.color} stroke="#000" strokeWidth="2" opacity="0.9" />
+                                                )}
+                                                {shapeBuilder.baseShape.shape === 'polygon' && (
+                                                    <polygon points="100,60 140,140 60,140" fill={shapeBuilder.baseShape.color} stroke="#000" strokeWidth="2" opacity="0.9" />
+                                                )}
+                                                {shapeBuilder.baseShape.shape === 'hexagon' && (
+                                                    <polygon points="100,60 130,75 130,105 100,120 70,105 70,75" fill={shapeBuilder.baseShape.color} stroke="#000" strokeWidth="2" opacity="0.9" />
+                                                )}
+                                                
+                                                {/* Port Key */}
+                                                {shapeBuilder.portKey.visible && (
+                                                    <>
+                                                        {shapeBuilder.portKey.shape === 'square' && (
+                                                            <rect x={shapeBuilder.portKey.x - shapeBuilder.portKey.size/2} y={shapeBuilder.portKey.y - shapeBuilder.portKey.size/2} width={shapeBuilder.portKey.size} height={shapeBuilder.portKey.size} fill={shapeBuilder.portKey.color} stroke="#000" strokeWidth="1.5" />
+                                                        )}
+                                                        {shapeBuilder.portKey.shape === 'circle' && (
+                                                            <circle cx={shapeBuilder.portKey.x} cy={shapeBuilder.portKey.y} r={shapeBuilder.portKey.size/2} fill={shapeBuilder.portKey.color} stroke="#000" strokeWidth="1.5" />
+                                                        )}
+                                                        {shapeBuilder.portKey.shape === 'triangle' && (
+                                                            <polygon points={`${shapeBuilder.portKey.x},${shapeBuilder.portKey.y - shapeBuilder.portKey.size/2} ${shapeBuilder.portKey.x + shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y + shapeBuilder.portKey.size/2} ${shapeBuilder.portKey.x - shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y + shapeBuilder.portKey.size/2}`} fill={shapeBuilder.portKey.color} stroke="#000" strokeWidth="1.5" />
+                                                        )}
+                                                        {shapeBuilder.portKey.shape === 'hexagon' && (
+                                                            <polygon points={`${shapeBuilder.portKey.x},${shapeBuilder.portKey.y - shapeBuilder.portKey.size/2} ${shapeBuilder.portKey.x + shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y - shapeBuilder.portKey.size/4} ${shapeBuilder.portKey.x + shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y + shapeBuilder.portKey.size/4} ${shapeBuilder.portKey.x},${shapeBuilder.portKey.y + shapeBuilder.portKey.size/2} ${shapeBuilder.portKey.x - shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y + shapeBuilder.portKey.size/4} ${shapeBuilder.portKey.x - shapeBuilder.portKey.size/2},${shapeBuilder.portKey.y - shapeBuilder.portKey.size/4}`} fill={shapeBuilder.portKey.color} stroke="#000" strokeWidth="1.5" />
+                                                        )}
+                                                        {shapeBuilder.portKey.shape === 'wedge' && (
+                                                            <path d={`M ${shapeBuilder.portKey.x} ${shapeBuilder.portKey.y} L ${shapeBuilder.portKey.x + shapeBuilder.portKey.size} ${shapeBuilder.portKey.y - shapeBuilder.portKey.size/2} L ${shapeBuilder.portKey.x + shapeBuilder.portKey.size} ${shapeBuilder.portKey.y + shapeBuilder.portKey.size/2} Z`} fill={shapeBuilder.portKey.color} stroke="#000" strokeWidth="1.5" />
+                                                        )}
+                                                    </>
+                                                )}
+                                                
+                                                {/* Malicious Core */}
+                                                {shapeBuilder.coreMarker.visible && (
+                                                    <polygon points="100,85 105,95 115,95 107,102 110,112 100,105 90,112 93,102 85,95 95,95" fill={shapeBuilder.coreMarker.color} stroke="#000" strokeWidth="1.5" opacity="0.9" />
+                                                )}
+                                                
+                                                {/* Name Label */}
+                                                <text x="100" y="185" textAnchor="middle" className={`text-xs font-bold ${currentTheme==='light'?'fill-slate-700':'fill-slate-300'}`}>
+                                                    {shapeBuilder.name || 'Custom Packet'}
+                                                </text>
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    {/* RIGHT PANEL: Property Editor */}
+                                    <div className={`w-80 ${currentTheme==='light'?'bg-white border-l border-slate-300':'bg-slate-900 border-l border-slate-700'} overflow-y-auto p-6 space-y-6`}>
+                                        
+                                        {creatorTab === 'base' && (
+                                            <>
+                                                <div className={`text-sm font-black ${currentTheme==='light'?'text-slate-700':'text-slate-300'} mb-4`}>Base Shape Properties</div>
+                                                
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-2`}>Width: {shapeBuilder.baseShape.width}px</label>
+                                                        <input type="range" min="40" max="120" value={shapeBuilder.baseShape.width} onChange={(e) => setShapeBuilder({...shapeBuilder, baseShape: {...shapeBuilder.baseShape, width: parseInt(e.target.value)}})} className="w-full" />
+                                                    </div>
+                                                    
+                                                    <div>
+                                                        <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-2`}>Height: {shapeBuilder.baseShape.height}px</label>
+                                                        <input type="range" min="40" max="120" value={shapeBuilder.baseShape.height} onChange={(e) => setShapeBuilder({...shapeBuilder, baseShape: {...shapeBuilder.baseShape, height: parseInt(e.target.value)}})} className="w-full" />
+                                                    </div>
+                                                    
+                                                    <div>
+                                                        <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-2`}>Border Radius: {shapeBuilder.baseShape.borderRadius}px</label>
+                                                        <input type="range" min="0" max="30" value={shapeBuilder.baseShape.borderRadius} onChange={(e) => setShapeBuilder({...shapeBuilder, baseShape: {...shapeBuilder.baseShape, borderRadius: parseInt(e.target.value)}})} className="w-full" />
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                        
+                                        {creatorTab === 'encryption' && selectedLayer && selectedLayer.startsWith('ring-') && (
+                                            <>
+                                                {(() => {
+                                                    const ringId = parseInt(selectedLayer.split('-')[1]);
+                                                    const ring = shapeBuilder.encryptionRings.find(r => r.id === ringId);
+                                                    if (!ring) return null;
+                                                    
+                                                    return (
+                                                        <>
+                                                            <div className={`text-sm font-black ${currentTheme==='light'?'text-slate-700':'text-slate-300'} mb-4`}>Ring Properties</div>
+                                                            
+                                                            <div className="space-y-4">
+                                                                <div>
+                                                                    <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-2`}>Radius: {ring.radius}px</label>
+                                                                    <input type="range" min="30" max="95" value={ring.radius} onChange={(e) => {
+                                                                        const updated = shapeBuilder.encryptionRings.map(r => r.id === ringId ? {...r, radius: parseInt(e.target.value)} : r);
+                                                                        setShapeBuilder({...shapeBuilder, encryptionRings: updated});
+                                                                    }} className="w-full" />
+                                                                </div>
+                                                                
+                                                                <div>
+                                                                    <label className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} block mb-2`}>Stroke Width: {ring.strokeWidth}px</label>
+                                                                    <input type="range" min="1" max="6" value={ring.strokeWidth} onChange={(e) => {
+                                                                        const updated = shapeBuilder.encryptionRings.map(r => r.id === ringId ? {...r, strokeWidth: parseInt(e.target.value)} : r);
+                                                                        setShapeBuilder({...shapeBuilder, encryptionRings: updated});
+                                                                    }} className="w-full" />
+                                                                </div>
+                                                                
+                                                                <div>
+                                                                    <div className={`text-xs font-bold ${currentTheme==='light'?'text-slate-600':'text-slate-400'} mb-2`}>Ring Color</div>
+                                                                    <div className="grid grid-cols-4 gap-2">
+                                                                        {['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#64748b'].map(c => (
+                                                                            <button key={c} onClick={() => {
+                                                                                const updated = shapeBuilder.encryptionRings.map(r => r.id === ringId ? {...r, color: c} : r);
+                                                                                setShapeBuilder({...shapeBuilder, encryptionRings: updated});
+                                                                            }} className={`w-10 h-10 rounded-lg border-4 transition-all ${ring.color === c ? 'border-white shadow-lg scale-110' : 'border-transparent opacity-70 hover:opacity-100'}`} style={{backgroundColor: c}}></button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </>
+                                                    );
+                                                })()}
+                                            </>
+                                        )}
+                                        
+                                        {!selectedLayer && creatorTab !== 'base' && creatorTab !== 'complete' && (
+                                            <div className={`p-4 rounded-lg border-2 ${currentTheme==='light'?'bg-slate-50 border-slate-200 text-slate-600':'bg-slate-800 border-slate-600 text-slate-400'} text-sm text-center`}>
+                                                Select a layer from the left panel to edit its properties
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
